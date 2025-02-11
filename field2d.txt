@@ -1,0 +1,350 @@
+from collections import namedtuple
+from typing import NamedTuple
+import numpy as np
+
+class BaseCell:
+    pass
+
+class NoneCell(BaseCell):
+    @property
+    def velocity(self): return np.array([0, 0]) # TODO: check if that's right
+    
+    @property
+    def pressure(self): return 0 # TODO: check if that's right
+    
+    def __add__(self, other): return other
+    def __sub__(self, other): return other
+    def __mult__(self, other): return other
+    def __truediv__(self, other): return other
+
+class Cell(BaseCell):
+    def __init__(self, 
+        velocity = np.array([0, 0]), density = 0,
+        divergence = 0, pressure = 0
+    ):
+        self.velocity = velocity
+        self.density = density
+        
+        # For simulation purposes only
+        self.divergence = divergence
+        self.pressure = pressure
+    
+    def __str__(self):
+        return f"Cell(velocity=({self.velocity[0]:.2f}, {self.velocity[1]:.2f}), density={self.density:.2f})"
+    
+    def __repr__(self):
+        return str(self)
+    
+    def __add__(self, other):
+        if type(other) == Cell:
+            return Cell(
+                self.velocity + other.velocity,
+                self.density + other.density,
+                self.divergence + other.divergence,
+                self.pressure + other.pressure
+            )
+        elif type(other) == NoneCell:
+            return self
+        else:
+            raise TypeError(f"unsupported operand type(s) for +: 'Cell' and '{type(other).__name__}'")
+    
+    def __sub__(self, other):
+        if type(other) == Cell:
+            return Cell(
+                self.velocity - other.velocity,
+                self.density - other.density,
+                self.divergence - other.divergence,
+                self.pressure - other.pressure
+            )
+        elif type(other) == NoneCell:
+            return self
+        else:
+            raise TypeError(f"unsupported operand type(s) for -: 'Cell' and '{type(other).__name__}'")
+    
+    def __mul__(self, other):
+        if type(other) == float or type(other) == int:
+            return Cell(
+                self.velocity * other,
+                self.density * other,
+                self.divergence * other,
+                self.pressure * other
+            )
+        elif type(other) == NoneCell:
+            return self
+        else:
+            raise TypeError(f"unsupported operand type(s) for +: 'Cell' and '{type(other).__name__}'")
+    
+    def __truediv__(self, other):
+        if type(other) == float or type(other) == int:
+            return Cell(
+                self.velocity / other,
+                self.density / other,
+                self.divergence / other,
+                self.pressure / other
+            )
+        elif type(other) == NoneCell:
+            return self
+        else:
+            raise TypeError(f"unsupported operand type(s) for /: 'Cell' and '{type(other).__name__}'")
+    
+    @staticmethod
+    def interpolate(cell1, cell2, t):
+        if t < 0 or t > 1:
+            raise ValueError("parameter 't' is out of scope [0; 1]")
+        
+        if type(cell1) == NoneCell:
+            if type(cell2) == NoneCell:
+                return NoneCell()
+            else:
+                return cell2
+        else:
+            if type(cell2) == NoneCell:
+                return cell1
+            else:
+                return cell1 * (1 - t) + cell2 * t # important bit
+
+class Neighbours(NamedTuple):
+    left: BaseCell
+    up: BaseCell
+    right: BaseCell
+    down: BaseCell
+    
+    def __len__(self):
+        count = 0
+        for neighbour in self:
+            if type(neighbour) != NoneCell:
+                count += 1
+        
+        return count
+
+
+class CellBuffer:
+    def __init__(self, size, generator = lambda coords: Cell()):
+        self.size = size
+        
+        self._data = []
+        for y in range(int(self.size[1])):
+            for x in range(int(self.size[0])):
+                coords = np.array([x, y])
+                cell = generator(coords)
+                self._data.append(cell)
+    
+    def _validate_coords(self, coords):
+            return coords[0] >= 0 and coords[0] < self.size[0] \
+                and coords[1] >= 0 and coords[1] < self.size[1]
+    
+    def __getitem__(self, coords):
+        i = int(coords[1]) * int(self.size[0]) + int(coords[0])
+        return self._data[i] \
+            if self._validate_coords(coords) \
+            else NoneCell() # IMPORTANT
+    
+    def __setitem__(self, coords, value):
+        if self._validate_coords(coords):
+            i = int(coords[1]) * int(self.size[0]) + int(coords[0])
+            if type(value) == Cell:
+                self._data[i] = value
+            else:
+                raise ValueError(f"the value '{value}' must be from type 'Cell'")
+        else:
+            raise ValueError(f"coords '{coords}'  outrange the buffer size '{self.size}'")
+    
+    def copy_from(self, other):
+        if self.size == other.size:
+            for y in range(int(self.size[1])):
+                for x in range(int(self.size[0])): 
+                    coords = np.array([x, y])
+                    t = other[coords]
+                    self[coords] = Cell( # TODO: find a better way to do this
+                        t.velocity, t.density,
+                        t.divergence, t.pressure
+                    )
+        else:
+            raise ValueError("The size of the buffer to copy must be equal.")
+    
+    def copy_to(self, other):
+        other.copy_from(self)
+    
+    def interpolate_cell(self, coords): # coords is a tuple of *floats*
+        fract = np.array([coords[0] % 1, coords[1] % 1])
+        floor = coords - fract
+        
+        down_left = self[floor]
+        down_right = self[floor + np.array([1, 0])]
+        up_left = self[floor + np.array([0, 1])]
+        up_right = self[floor + np.array([1, 1])]
+        
+        return Cell.interpolate(
+            Cell.interpolate(down_left, down_right, fract[0]),
+            Cell.interpolate(up_left, up_right, fract[0]),
+            fract[1]
+        )
+    
+    def fetch_neighbours(self, coords):
+        return Neighbours(
+            left = self[coords + np.array([1, 0])],
+            up = self[coords + np.array([0, 1])],
+            right = self[coords + np.array([-1, 0])],
+            down = self[coords + np.array([0, -1])]
+        )
+    
+    # TODO: temp
+    def calculate_magnitude(self):
+        magnitude = np.array([0, 0])
+        for y in range(int(self.size[1])):
+            for x in range(int(self.size[0])):
+                coords = np.array([x, y])
+                cell = self[coords]
+                
+                magnitude += np.array([abs(cell.velocity[0]), abs(cell.velocity[1])])
+        
+        return magnitude / (self.size[0] * self.size[1])
+
+class Field2D:
+    def __init__(self, size, generator = lambda coords: Cell()):
+        self.size = size
+        
+        self.front_buffer = CellBuffer(size, generator)
+        self.back_buffer = CellBuffer(size, lambda coords: Cell())
+        
+        self.init_magnitude = self.front_buffer.calculate_magnitude() # TODO: temp
+    
+    # TODO: overload the subscript operator
+    
+    def update(self, timestep, iterations, k):
+        self._project(iterations)
+        self._advect(timestep)
+        self._diffuse(iterations, k)
+        
+    def _project(self, iterations):
+        # Calculate divergence
+        for y in range(int(self.size[1])):
+			for x in range(int(self.size[0])):
+				coords = np.array([x, y])
+				cell = self.front_buffer[coords]
+				neighbours = self.front_buffer.fetch_neighbours(coords)
+				
+				cell.divergence = Field2D._divergence(neighbours)
+				cell.pressure = 0
+        
+        # Calculate pressure
+        for i in range(iterations):
+            self.front_buffer.copy_to(self.back_buffer)
+            
+            for y in range(int(self.size[1])):
+                for x in range(int(self.size[0])):
+                    coords = np.array([x, y])
+                        
+                    cell_front = self.front_buffer[coords]
+                    cell_back = self.back_buffer[coords]
+                        
+                    neighbours_front = self.front_buffer.fetch_neighbours(coords)
+                    
+                    cell_back.pressure = Field2D._update_pressure(neighbours_front, cell_front.divergence)
+                            
+            self.front_buffer.copy_from(self.back_buffer)
+        
+        # Calculate velocity
+        for y in range(int(self.size[1])):
+            for x in range(int(self.size[0])):
+                coords = np.array([x, y])
+                cell = self.front_buffer[coords]
+                neighbours = self.front_buffer.fetch_neighbours(coords)
+                
+                cell.velocity -= Field2D._gradient(neighbours)
+        
+        """
+        # TODO: Check if this is a sensible way of fixing the bug
+        current_magnitude = self.front_buffer.calculate_magnitude() # TODO: temp
+        for y in range(int(self.size[1])):
+            for x in range(int(self.size[0])):
+                coords = np.array([x, y])
+                cell = self.front_buffer[coords]
+                cell.velocity[0] *= self.init_magnitude[0] / current_magnitude[0]
+                cell.velocity[1] *= self.init_magnitude[1] / current_magnitude[1]
+        """
+    
+    def _advect(self, timestep):
+        for y in range(int(self.size[1])):
+                for x in range(int(self.size[0])):
+                    coords = np.array([x, y])
+                    cell = self.front_buffer[coords]
+                    
+                    backtrace_coords = coords + cell.velocity * timestep
+                    
+                    # clamp the coords
+                    backtrace_coords[0] = Field2D._clamp(backtrace_coords[0], 0, self.size[0] - 1)
+                    backtrace_coords[1] = Field2D._clamp(backtrace_coords[1], 0, self.size[1] - 1)
+                                        
+                    self.back_buffer[coords] = \
+                    self.front_buffer.interpolate_cell(backtrace_coords)
+            
+        self.front_buffer, self.back_buffer = \
+        self.back_buffer, self.front_buffer
+    
+    def _diffuse(self, iterations, k):
+        for i in range(iterations):
+            self.front_buffer.copy_to(self.back_buffer)
+            
+            for y in range(int(self.size[1])):
+                for x in range(int(self.size[0])):
+                    coords = np.array([x, y])
+                    cell_front = self.front_buffer[coords]
+                    neighbours_front = self.front_buffer.fetch_neighbours(coords)
+                    
+                    self.back_buffer[coords] = Field2D._update_diffuse(cell_front, neighbours_front, k)
+                    
+            self.front_buffer.copy_from(self.back_buffer)
+            
+            # TODO: tmp
+            coords = np.array([3, 7])
+            
+    @staticmethod
+    def _divergence(neighbours):
+        return (
+            (neighbours.left.velocity[0] - neighbours.right.velocity[0]) +
+            (neighbours.up.velocity[1] - neighbours.down.velocity[1])
+        ) / 2
+    
+    @staticmethod
+    def _gradient(neighbours):
+        return np.array([
+            (neighbours.left.pressure - neighbours.right.pressure) / 2,
+            (neighbours.up.pressure - neighbours.down.pressure) / 2
+        ])
+    
+    @staticmethod
+    def _update_pressure(neighbours, divergence):
+        return ((
+            neighbours.left.pressure + neighbours.up.pressure + 
+            neighbours.right.pressure + neighbours.down.pressure) + divergence
+        ) / 4
+    
+    @staticmethod
+    def _update_diffuse(cell, neighbours, k):
+        return (
+            cell + (
+                neighbours.left + neighbours.up +
+                neighbours.right + neighbours.down
+            ) * (k / len(neighbours))
+        ) / (1 + k)
+    
+    @staticmethod
+    def _clamp(val, min_val, max_val):
+        if val < min_val: return min_val
+        elif val > max_val: return max_val
+        else: return val
+
+# TODO: temp
+"""
+grid_size = np.array([10, 15])
+
+def generator(coords):
+    if coords.distance_squared_to(grid_size / 2) < 5:
+        return Cell(density=1)
+    else:
+        return Cell()
+
+buffer = CellBuffer(grid_size, generator)
+print(buffer.fetch_neighbours(np.array([0, 5])))
+"""
