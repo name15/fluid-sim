@@ -14,8 +14,4 @@ class Field2D:
         for x in range(size[0]):
             for y in range(size[1]):
                 self.data[x, y] = generator(x, y)
-            
-    def __getitem__(self, coords):
-        return self.data[coords]
-
     
