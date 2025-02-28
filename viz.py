@@ -2,6 +2,7 @@ import moderngl
 import moderngl_window as mglw 
 from data import Field2D
 import numpy as np
+from timeit import timeit
 
 # Define programs for rendering grid and arrows
 
@@ -52,34 +53,6 @@ void main(){
 }
 """
 
-def update_arrows(arrows: np.ndarray, grid_size: tuple, velocities_x: np.ndarray, velocities_y: np.ndarray):
-    for y in range(grid_size[1]):
-        for x in range(grid_size[0]):
-            i = (y * grid_size[0] + x) * 4
-            
-            start_x = x + 0.5
-            start_y = y + 0.5
-
-            dx = velocities_x[x, y]
-            dy = velocities_y[x, y]
-            
-            end_x = start_x + dx
-            end_y = start_y + dy
-            
-            arrows[i]   = start_x
-            arrows[i+1] = start_y
-            arrows[i+2] = end_x
-            arrows[i+3] = end_y
-
-
-def update_colors(colors: np.ndarray, grid_size: tuple, density: np.ndarray):
-    for y in range(grid_size[1]):
-        for x in range(grid_size[0]):
-            i = (y * grid_size[0] + x) * 12
-            c = density[x, y] + 0.1
-            for j in range(12):
-                colors[i + j] = c
-
 
 class FluidViz(mglw.WindowConfig):
     title = "Fluid demo"
@@ -95,23 +68,25 @@ class FluidViz(mglw.WindowConfig):
 
         # Generate mesh (just once)
         gs = self.grid_size
-        vertices = []
-        faces = []
-        d = 0.0 # Grid spacing
-        for y in range(gs[1]):
-            for x in range(gs[0]):
-                bl = (x + d, y + d)
-                br = (x + 1 - d, y + d)
-                tl = (x + d, y + 1 - d)
-                tr = (x + 1 - d, y + 1 - d)
-                vertices.extend([bl, br, tr, tl])
-                l = len(vertices)
-                faces.extend([l-4, l-2, l-3, l-4, l-1, l-2])
+        (y, x) = np.indices((gs[1], gs[0]))
+        (yf, xf) = (y.flatten(), x.flatten())
+        self.vertices = np.empty((gs[1] * gs[0] * 4, 2), dtype='f4')
+        self.vertices[0::4] = np.stack([xf, yf], axis=1)
+        self.vertices[1::4] = np.stack([xf + 1, yf], axis=1)
+        self.vertices[2::4] = np.stack([xf + 1, yf + 1], axis=1)
+        self.vertices[3::4] = np.stack([xf, yf + 1], axis=1)
         
-        self.vertices = np.array(vertices, dtype='f4')
-        
-        self.faces = np.array(faces, dtype='i4')
-        self.colors = np.zeros(gs[0] * gs[1] * 12, dtype='f4')
+        self.faces = np.empty((gs[1] * gs[0] * 6), dtype='i4')
+        l = 4 * np.arange(gs[0] * gs[1])
+        self.faces[0::6] = l
+        self.faces[1::6] = l + 2
+        self.faces[2::6] = l + 1
+        self.faces[3::6] = l
+        self.faces[4::6] = l + 3
+        self.faces[5::6] = l + 2
+
+        # Init color array
+        self.colors = np.zeros((gs[1], gs[0], 12), dtype='f4')
         
         # Create buffers for mesh
         self.mesh_vbo = self.ctx.buffer(self.vertices.tobytes())
@@ -138,7 +113,10 @@ class FluidViz(mglw.WindowConfig):
         )
 
         # Setup arrow buffer and program (dynamic buffer updated per frame)
-        self.arrows = np.empty(gs[0] * gs[1] * 4, dtype=np.float32)
+        self.arrows = np.empty((gs[1], gs[0], 4), dtype=np.float32)
+        self.arrows[:, :, 0] = x + 0.5 # Start x
+        self.arrows[:, :, 1] = y + 0.5 # Start y
+        
         self.arrow_vbo = self.ctx.buffer(self.arrows.tobytes(), dynamic=True)
         self.arrow_prog = self.ctx.program(vertex_shader=arrow_vertex_shader, fragment_shader=arrow_fragment_shader)
         self.arrow_vao = self.ctx.vertex_array(
@@ -159,11 +137,12 @@ class FluidViz(mglw.WindowConfig):
         self.ctx.clear(0.0, 0.0, 0.0)
 
         # Update arrow positions buffer
-        update_colors(self.colors, self.grid_size, self.field.data['density'])
+        self.colors[:, :, :] = self.field.data['density'][:, :, np.newaxis] + 0.1
         self.color_vbo.write(self.colors.tobytes())
 
         # Update arrow positions buffer
-        update_arrows(self.arrows, self.grid_size, self.field.data['velocity_x'], self.field.data['velocity_y'])
+        self.arrows[:, :, 2] = self.arrows[:, :, 0] + self.field.data['velocity_x'] # End x
+        self.arrows[:, :, 3] = self.arrows[:, :, 1] + self.field.data['velocity_y'] # End y
         self.arrow_vbo.write(self.arrows.tobytes())
 
         # Draw mesh and arrows

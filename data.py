@@ -10,8 +10,8 @@ class Field2D:
     def __init__(self, size: tuple[int, int], generator):
         self.size = np.array(size)
 
-        self.data = np.zeros(size, dtype=Cell)
-        for x in range(size[0]):
-            for y in range(size[1]):
-                self.data[x, y] = generator(x, y)
+        self.data = np.zeros((size[1], size[0]), dtype=Cell)
+        for y in range(size[1]):
+            for x in range(size[0]):
+                self.data[y, x] = generator(x, y)
     

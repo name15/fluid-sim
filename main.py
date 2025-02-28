@@ -5,7 +5,7 @@ from sim import FluidSim
 import threading
 
 # Generate initial field data
-grid_size = (80, 60)
+grid_size = (30, 15)
 
 def generator(x, y):
     center = (0.25 * grid_size[0], 0.5 * grid_size[1])
@@ -32,7 +32,7 @@ sim = FluidSim(field)
 frame = 0
 
 while True:
-    sim.step(0.01)
+    sim.step()
 
     if frame % 100 == 0 and not viz_thread.is_alive():
         break
