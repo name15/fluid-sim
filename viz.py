@@ -1,8 +1,6 @@
 import moderngl
 import moderngl_window as mglw 
-from data import Field2D
 import numpy as np
-from timeit import timeit
 
 # Define programs for rendering grid and arrows
 
@@ -59,16 +57,19 @@ class FluidViz(mglw.WindowConfig):
     window_size = (800, 600)
 
     @classmethod
-    def configure(cls, field: Field2D):
+    def configure_field(cls, field: np.ndarray):
         cls.field = field
-        cls.grid_size = field.size
+
+    @classmethod
+    def configure_state(cls, state):
+        cls.state = state
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
         # Generate mesh (just once)
-        gs = self.grid_size
-        (y, x) = np.indices((gs[1], gs[0]))
+        gs = self.field.shape
+        (y, x) = np.indices(gs)
         (yf, xf) = (y.flatten(), x.flatten())
         self.vertices = np.empty((gs[1] * gs[0] * 4, 2), dtype='f4')
         self.vertices[0::4] = np.stack([xf, yf], axis=1)
@@ -86,7 +87,7 @@ class FluidViz(mglw.WindowConfig):
         self.faces[5::6] = l + 2
 
         # Init color array
-        self.colors = np.zeros((gs[1], gs[0], 12), dtype='f4')
+        self.colors = np.zeros((gs[0], gs[1], 12), dtype='f4')
         
         # Create buffers for mesh
         self.mesh_vbo = self.ctx.buffer(self.vertices.tobytes())
@@ -95,9 +96,9 @@ class FluidViz(mglw.WindowConfig):
         # Compile shader program for mesh
         self.grid_prog = self.ctx.program(vertex_shader=grid_vertex_shader, fragment_shader=grid_fragment_shader)
         self.keys = {}
-        self.translate = np.array((gs[0] / 2, gs[1] / 2), dtype='f4')
+        self.translate = np.array((gs[1] / 2, gs[0] / 2), dtype='f4')
         self.grid_prog['translate'].write(self.translate.tobytes())
-        self.scale = np.array(min(2/gs[0], 2/gs[1]), dtype='f4')
+        self.scale = np.array(min(2/gs[1], 2/gs[0]), dtype='f4')
         self.grid_prog['scale'].write(self.scale.tobytes())
         
         # Create a buffer for vertex colors
@@ -113,7 +114,7 @@ class FluidViz(mglw.WindowConfig):
         )
 
         # Setup arrow buffer and program (dynamic buffer updated per frame)
-        self.arrows = np.empty((gs[1], gs[0], 4), dtype=np.float32)
+        self.arrows = np.empty((gs[0], gs[1], 4), dtype=np.float32)
         self.arrows[:, :, 0] = x + 0.5 # Start x
         self.arrows[:, :, 1] = y + 0.5 # Start y
         
@@ -123,6 +124,17 @@ class FluidViz(mglw.WindowConfig):
             self.arrow_prog,
             [(self.arrow_vbo, '2f', 'in_position')]
         )
+    
+    def on_key_event(self, key, action, modifiers):
+        if action == self.wnd.keys.ACTION_PRESS:
+            self.keys[key] = True
+            if key == self.wnd.keys.SPACE:
+                self.state['paused'] = not self.state['paused']
+                print('Resume' if self.state == 'paused' else 'Pause')
+            if key == self.wnd.keys.RIGHT:
+                self.state['next']()
+        if action == self.wnd.keys.ACTION_RELEASE:
+            self.keys[key] = False
     
     def on_render(self, time, frame_time):
         # Update viewport and ratio
@@ -134,15 +146,17 @@ class FluidViz(mglw.WindowConfig):
         self.transform()
 
         # Clear screen
-        self.ctx.clear(0.0, 0.0, 0.0)
+        self.ctx.clear(0.078, 0.137, 0.169)
 
         # Update arrow positions buffer
-        self.colors[:, :, :] = self.field.data['density'][:, :, np.newaxis] + 0.1
+        self.colors[:, :, :] = self.field['density'][:, :, np.newaxis]
+        # self.colors[:, :, 0::3] = - self.field['pressure'][:, :, np.newaxis]
+        # self.colors[:, :, 2::3] = self.field['pressure'][:, :, np.newaxis]
         self.color_vbo.write(self.colors.tobytes())
 
         # Update arrow positions buffer
-        self.arrows[:, :, 2] = self.arrows[:, :, 0] + self.field.data['velocity_x'] # End x
-        self.arrows[:, :, 3] = self.arrows[:, :, 1] + self.field.data['velocity_y'] # End y
+        self.arrows[:, :, 2] = self.arrows[:, :, 0] # + self.field['velocity_x'] # End x
+        self.arrows[:, :, 3] = self.arrows[:, :, 1] # + self.field['velocity_y'] # End y
         self.arrow_vbo.write(self.arrows.tobytes())
 
         # Draw mesh and arrows
@@ -166,12 +180,6 @@ class FluidViz(mglw.WindowConfig):
         
         move /= np.linalg.norm(move) + 0.01
         self.translate += move
-
-    def on_key_event(self, key, action, modifiers):
-        if action == self.wnd.keys.ACTION_PRESS:
-            self.keys[key] = True
-        if action == self.wnd.keys.ACTION_RELEASE:
-            self.keys[key] = False
     
     def transform(self):
         # TODO: Use mvp instead
