@@ -1,12 +1,11 @@
 import numpy as np
-from data import Cell
-
-clip = np.frompyfunc(lambda v, lim: -1 if v < 0 or v > lim - 1 else v, 2, 1)
+import numba as nb
+    
 
 class FluidSim:
     def __init__(self, field: np.ndarray):
         self.field = field
-        
+    
     def project(self, iter = 200):
         # Calculate divergence: (left_vx - right_vx + up_vy - down_vy) / 2
         self.field['divergence'][1:-1, 1:-1] = (
@@ -40,14 +39,19 @@ class FluidSim:
         y = y - self.field['velocity_y'] * dt
         x = x - self.field['velocity_x'] * dt        
         
-        yw = y.astype(int)
-        xw = x.astype(int)
+        yw = y.astype(np.int16)
+        xw = x.astype(np.int16)
         yf = y - yw
         xf = x - xw
-            
+
         for key in ['density', 'velocity_x', 'velocity_y']:
+            def clip(a, b):
+                mask = (a < 0) | (a > b)
+                a[mask] = -1
+                return a
+
             def shift(x, y):
-                return self.field[key][clip(yw + y, ys).astype(int), clip(xw + x, xs).astype(int)]
+                return self.field[key][clip(yw + y, ys - 1), clip(xw + x, xs - 1)]
 
             self.field[key] = \
                 (shift(0, 0) * (1 - xf) + shift(1, 0) * xf) * (1 - yf) + \

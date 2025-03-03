@@ -6,15 +6,12 @@ import threading
 from time import sleep
 
 # Generate initial field data
-grid_size = (250, 400) # (height, width)
-
-def trig(x, y):
-    return np.array((np.sin(x / 7) + np.cos(y / 7), np.cos(x / 7), - np.sin(y / 7), 0, 0), dtype=Cell)
+grid_size = (180, 360) # (height, width)
 
 def beam(x, y):
-    center = (0.25 * grid_size[1], 0.5 * grid_size[0])
+    center = (0.1 * grid_size[1], 0.5 * grid_size[0])
     if (x - center[0])**2 + (y - center[1])**2 < 50:
-        return np.array((10000, 5000000, 0, 0, 0), dtype=Cell)
+        return np.array((100, 500, 0, 0, 0), dtype=Cell)
     else:
         return np.array((0, 0, 0, 0, 0), dtype=Cell)
 
@@ -28,8 +25,8 @@ sim = FluidSim(field)
 
 def step():
     sim.project(iter=200)
-    sim.advect(dt=0.01)
-    sim.diffuse(iter=1, k=0.03)
+    sim.advect(dt=0.5)
+    # sim.diffuse(iter=1, k=0.03)
 
 # Define state
 state = {
@@ -37,7 +34,7 @@ state = {
     'paused': True,
     'next': step,
     'show pressure': False,
-    'show vectors': False
+    'show vectors': True
 }
 
 # Start UI thread

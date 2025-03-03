@@ -1,6 +1,7 @@
 import moderngl
 import moderngl_window as mglw 
 import numpy as np
+from data import Cell
 
 # Define programs for rendering grid and vectors
 
@@ -67,7 +68,7 @@ class FluidViz(mglw.WindowConfig):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # Generate mesh (just once)
+        # Generate mesh
         gs = self.field.shape
         (y, x) = np.indices(gs)
         (yf, xf) = (y.flatten(), x.flatten())
@@ -123,7 +124,8 @@ class FluidViz(mglw.WindowConfig):
 
         # Initialize viewing variables
         self.center()
-        self.vector_scale = 0.01
+        self.vector_scale = 1
+        self.last_pos = None
     
     def on_key_event(self, key, action, modifiers):
         if action == self.wnd.keys.ACTION_RELEASE:
@@ -143,7 +145,7 @@ class FluidViz(mglw.WindowConfig):
         # Update viewport and ratio
         width, height = self.wnd.size
         self.ctx.viewport = (0, 0, width, height)
-        self.ratio = np.array(width / height, dtype='f4').tobytes()
+        self.ratio = np.array(width / height, dtype='f4')
         
         # Update transformation uniforms
         self.transform()
@@ -195,6 +197,28 @@ class FluidViz(mglw.WindowConfig):
         move /= np.linalg.norm(move) + 0.01
         self.translate += 0.075 * move / self.scale
     
+    def on_mouse_drag_event(self, x, y, dx, dy):
+        # print(x, y, dx, dy)
+        width, height = self.wnd.size
+        ys, xs = self.field.shape
+        y, x = 1 - y / height * 2, x / width * 2 - 1
+        ya = y / self.scale.item() + self.translate[1]
+        xa = x / self.scale.item() * self.ratio.item() + self.translate[0]
+        
+        if self.last_pos:
+            yb, xb = self.last_pos[0], self.last_pos[1]
+            for i in range(0, 10):
+                t = i / 10
+                yt, xt = ya * (1 - t) + yb * t, xa * (1 - t) + xb * t  
+                if yt < 0 or xt < 0 or yt >= ys or xt >= xs:
+                    continue     
+                self.field[int(yt), int(xt)] = np.array((10, dx, - dy, 0, 0), dtype=Cell)
+        
+        self.last_pos = (ya, xa)
+    
+    def on_mouse_release_event(self, x, y, button):
+        self.last_pos = None
+
     def center(self):
         gs = self.field.shape
         self.translate = np.array((gs[1] / 2, gs[0] / 2), dtype='f4')
@@ -204,10 +228,10 @@ class FluidViz(mglw.WindowConfig):
         # TODO: Use mvp instead
         self.grid_prog['translate'].write(self.translate.tobytes())
         self.grid_prog['scale'].write(self.scale.tobytes())
-        self.grid_prog['ratio'].write(self.ratio)
+        self.grid_prog['ratio'].write(self.ratio.tobytes())
         self.vector_prog['translate'].write(self.translate.tobytes())
         self.vector_prog['scale'].write(self.scale.tobytes())
-        self.vector_prog['ratio'].write(self.ratio)
+        self.vector_prog['ratio'].write(self.ratio.tobytes())
 
     def on_close(self):
         super().on_close()
