@@ -1,32 +1,28 @@
-import numpy as np
-from data import Cell
+from data import Field
 from viz import FluidViz
 from sim import FluidSim
 import threading
 from time import sleep
 
 # Generate initial field data
-grid_size = (180, 360) # (height, width)
+grid_size = (480, 720) # (height, width)
 
-def beam(x, y):
-    center = (0.1 * grid_size[1], 0.5 * grid_size[0])
-    if (x - center[0])**2 + (y - center[1])**2 < 50:
-        return np.array((100, 500, 0, 0, 0), dtype=Cell)
+def beam(y, x):
+    center = (0.5 * grid_size[0], 0.1 * grid_size[1])
+    if (y - center[0])**2 + (x - center[1])**2 < 50:
+        return 100, 500, 0
     else:
-        return np.array((0, 0, 0, 0, 0), dtype=Cell)
+        return 0, 0, 0
 
-field = np.zeros(grid_size, dtype=Cell)
-for y in range(grid_size[0]):
-    for x in range(grid_size[1]):
-        field[y, x] = beam(x, y)
+field = Field(beam, grid_size)
 
 # Start simulation on this thread
 sim = FluidSim(field)
 
 def step():
-    sim.project(iter=200)
+    sim.project(pressure_iter=10)
     sim.advect(dt=0.5)
-    # sim.diffuse(iter=1, k=0.03)
+    sim.diffuse(iter=1, k=0.03)
 
 # Define state
 state = {
@@ -34,11 +30,12 @@ state = {
     'paused': True,
     'next': step,
     'show pressure': False,
-    'show vectors': True
+    'show vectors': True,
+    'pen size': 5
 }
 
 # Start UI thread
-FluidViz.configure_field(field)
+FluidViz.configure_simulation(sim)
 FluidViz.configure_state(state)
 
 def run_viz():

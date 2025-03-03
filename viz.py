@@ -1,7 +1,6 @@
 import moderngl
 import moderngl_window as mglw 
 import numpy as np
-from data import Cell
 
 # Define programs for rendering grid and vectors
 
@@ -58,8 +57,8 @@ class FluidViz(mglw.WindowConfig):
     window_size = (800, 600)
 
     @classmethod
-    def configure_field(cls, field: np.ndarray):
-        cls.field = field
+    def configure_simulation(cls, simulation):
+        cls.simulation = simulation
 
     @classmethod
     def configure_state(cls, state):
@@ -69,7 +68,7 @@ class FluidViz(mglw.WindowConfig):
         super().__init__(**kwargs)
 
         # Generate mesh
-        gs = self.field.shape
+        gs = self.simulation.front.shape
         (y, x) = np.indices(gs)
         (yf, xf) = (y.flatten(), x.flatten())
         self.vertices = np.empty((gs[1] * gs[0] * 4, 2), dtype='f4')
@@ -154,18 +153,18 @@ class FluidViz(mglw.WindowConfig):
         self.ctx.clear(0.078, 0.137, 0.169)
 
         # Update vector positions buffer
-        self.colors[:, :, :] = self.field['density'][:, :, np.newaxis]
+        self.colors[:, :, :] = self.simulation.front.density[:, :, np.newaxis]
         if self.state['show pressure']:
-            self.colors[:, :, 0::3] = - self.field['pressure'][:, :, np.newaxis]
-            self.colors[:, :, 2::3] = self.field['pressure'][:, :, np.newaxis]
+            self.colors[:, :, 0::3] = - self.simulation.front.pressure[:, :, np.newaxis]
+            self.colors[:, :, 2::3] = self.simulation.front.pressure[:, :, np.newaxis]
         self.color_vbo.write(self.colors.tobytes())
 
         # Update vector positions buffer
         self.vectors[:, :, 2] = self.vectors[:, :, 0]
         self.vectors[:, :, 3] = self.vectors[:, :, 1]
         if self.state['show vectors']:
-            self.vectors[:, :, 2] += self.vector_scale * self.field['velocity_x'] # End x
-            self.vectors[:, :, 3] += self.vector_scale * self.field['velocity_y'] # End y
+            self.vectors[:, :, 2] += self.vector_scale * self.simulation.front.velocity_x # End x
+            self.vectors[:, :, 3] += self.vector_scale * self.simulation.front.velocity_y # End y
         self.vector_vbo.write(self.vectors.tobytes())
 
         # Draw mesh and vectors
@@ -200,7 +199,8 @@ class FluidViz(mglw.WindowConfig):
     def on_mouse_drag_event(self, x, y, dx, dy):
         # print(x, y, dx, dy)
         width, height = self.wnd.size
-        ys, xs = self.field.shape
+        ys, xs = self.simulation.front.shape
+        ps = self.state['pen size']
         y, x = 1 - y / height * 2, x / width * 2 - 1
         ya = y / self.scale.item() + self.translate[1]
         xa = x / self.scale.item() * self.ratio.item() + self.translate[0]
@@ -210,9 +210,14 @@ class FluidViz(mglw.WindowConfig):
             for i in range(0, 10):
                 t = i / 10
                 yt, xt = ya * (1 - t) + yb * t, xa * (1 - t) + xb * t  
-                if yt < 0 or xt < 0 or yt >= ys or xt >= xs:
-                    continue     
-                self.field[int(yt), int(xt)] = np.array((10, dx, - dy, 0, 0), dtype=Cell)
+                for dx in range(-ps, ps):
+                    for dy in range(-ps, ps):
+                        if dx**2 + dy**2 < ps**2:
+                            yn = yt + dy
+                            xn = xt + dx
+                            if yn < 0 or xn < 0 or yn >= ys or xn >= xs:
+                                continue
+                            self.simulation.front[int(yn), int(xn)] = 1, xa - xb, ya - yb
         
         self.last_pos = (ya, xa)
     
@@ -220,7 +225,7 @@ class FluidViz(mglw.WindowConfig):
         self.last_pos = None
 
     def center(self):
-        gs = self.field.shape
+        gs = self.simulation.front.shape
         self.translate = np.array((gs[1] / 2, gs[0] / 2), dtype='f4')
         self.scale = np.array(min(2/gs[1], 2/gs[0]), dtype='f4')
 
