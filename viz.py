@@ -53,7 +53,7 @@ void main(){
 
 
 class FluidViz(mglw.WindowConfig):
-    title = "Fluid demo"
+    title = "Fluid Sim"
     window_size = (800, 600)
 
     @classmethod
@@ -185,7 +185,7 @@ class FluidViz(mglw.WindowConfig):
             self.scale /= 1.05
         if self.keys.get(self.wnd.keys.Q, False):
             self.scale *= 1.05
-        if self.keys.get(self.wnd.keys.Z, False):
+        if self.keys.get(self.wnd.keys.R, False):
             self.center()
         if self.keys.get(self.wnd.keys.C, False):
             self.vector_scale /= 1.05

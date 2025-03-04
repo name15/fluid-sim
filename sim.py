@@ -1,22 +1,18 @@
 from data import Field
 import numpy as np
 import numba as nb
-from numba import cuda
 
-@cuda.jit
+@nb.njit(cache=True)
 def calc_divergence(divergence, velocity_x, velocity_y):
     # Calculate divergence
     # (left_vx - right_vx + up_vy - down_vy) / 2
-    y, x = cuda.grid(2)
+    divergence[1:-1, 1:-1] = (
+        velocity_x[1:-1, :-2] - velocity_x[1:-1, 2:] + 
+        velocity_y[:-2, 1:-1] - velocity_y[2:, 1:-1]
+    ) / 2
 
-    if 1 <= y < divergence.shape[0] and 1 <= x < divergence.shape[1]:
-        divergence[y, x] = (
-            velocity_x[y, x - 1] - velocity_x[y, x + 1] + 
-            velocity_y[y - 1, x] - velocity_y[y + 1, x]
-        ) / 2
-
-@nb.njit(parallel=True)
-def calc_pressure(pressure, divergence, iter, omega = 1.5):
+@nb.njit(parallel=True, cache=True)
+def calc_pressure(pressure, divergence, iter, omega):
     # Calculate pressure using jakobi iteration
     pressure.fill(0) # clear
 
@@ -33,7 +29,7 @@ def calc_pressure(pressure, divergence, iter, omega = 1.5):
                 # successive overrelaxation 
                 pressure[y, x] = pressure[y, x] + omega * (pressure_new - pressure[y, x])
 
-@nb.njit
+@nb.njit(cache=True)
 def apply_pressure(pressure, velocity_y, velocity_x):
     # Apply pressure gradient
     # velocity -= pressure gradient
@@ -47,7 +43,7 @@ def apply_pressure(pressure, velocity_y, velocity_x):
         pressure[:-2, 1:-1] - pressure[2:, 1:-1]
     ) / 2
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, cache=True)
 def advect(density, velocity_y, velocity_x, new_density, new_velocity_y, new_velocity_x, dt):
     height, width = density.shape
 
@@ -86,7 +82,7 @@ def advect(density, velocity_y, velocity_x, new_density, new_velocity_y, new_vel
                 (velocity_x[y1, x0] * (1 - fx) + velocity_x[y1, x1] * fx) * fy    
 
 
-@nb.njit
+@nb.njit(cache=True)
 def diffuse(density, velocity_y, velocity_x, new_density, new_velocity_y, new_velocity_x, iter, k):
     # Interpolate values
     # v = (v + k / 4 * (left_v + right_v + down_v + up_v) ) / (1 + k)
@@ -107,18 +103,11 @@ def diffuse(density, velocity_y, velocity_x, new_density, new_velocity_y, new_ve
 class FluidSim:
     def __init__(self, field: np.ndarray):
         self.front = field
-        self.back = Field(lambda y, x: field[y, x], field.shape)
+        self.back = Field(lambda y, x: field[y, x], field.shape)        
 
-        self.threads_per_block = (16, 16)
-        shape = self.front.density.shape
-        self.blocks_per_grid = (
-            (shape[0] + (self.threads_per_block[0] - 1)) // self.threads_per_block[0]
-            (shape[1] + (self.threads_per_block[1] - 1)) // self.threads_per_block[1]
-        )
-        
-    def project(self, pressure_iter = 100):
-        calc_divergence[self.blocks_per_grid, self.threads_per_block](self.front.divergence, self.front.velocity_x, self.front.velocity_y)
-        calc_pressure(self.front.pressure, self.front.divergence, pressure_iter)        
+    def project(self, pressure_iter = 100, omega = 1.5):
+        calc_divergence(self.front.divergence, self.front.velocity_x, self.front.velocity_y)
+        calc_pressure(self.front.pressure, self.front.divergence, pressure_iter, omega)        
         apply_pressure(self.front.pressure, self.front.velocity_y, self.front.velocity_x)
     
     def advect(self, dt):
@@ -129,3 +118,17 @@ class FluidSim:
         diffuse(self.front.density, self.front.velocity_y, self.front.velocity_x, self.back.density, self.back.velocity_y, self.back.velocity_x, iter, k)
         if iter % 2 == 1:
             self.front, self.back = self.back, self.front
+        
+    @classmethod
+    def warm_up(cls):
+        test = np.zeros((4, 4), dtype=np.float32)
+        print('- Kernel: calc_divergence')
+        calc_divergence(test, test, test)
+        print('- Kernel: calc_pressure')
+        calc_pressure(test, test, 1, 1)
+        print('- Kernel: apply_pressure')
+        apply_pressure(test, test, test)
+        print('- Kernel: advect')
+        advect(test, test, test, test, test, test, 1)
+        print('- Kernel: diffuse')
+        diffuse(test, test, test, test, test, test, 1, 1)
