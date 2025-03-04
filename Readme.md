@@ -4,6 +4,7 @@ A very minimal fluid simulation program with projection, (semi-lagrangian) advec
 To install the package:
 ```bash
 git clone https://github.com/name15/fluid-sim.git
+cd fluid-sim
 pip install -r requirements.txt
 ```
 
@@ -52,3 +53,6 @@ controls:
   C: Scale vectors down
   B: Scale vectors up
 ```
+
+# Screenshots
+![Demo](https://github.com/name15/fluid-sim/blob/71fbee917cf9edd4222cde6940b47b0e7533c333/demo.gif)
