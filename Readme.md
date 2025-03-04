@@ -52,3 +52,5 @@ controls:
   C: Scale vectors down
   B: Scale vectors up
 ```
+
+![Demo](https://github.com/name15/fluid-sim/blob/71fbee917cf9edd4222cde6940b47b0e7533c333/demo.gif)
