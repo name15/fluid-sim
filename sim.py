@@ -1,15 +1,19 @@
 from data import Field
 import numpy as np
 import numba as nb
+from numba import cuda
 
-@nb.njit
+@cuda.jit
 def calc_divergence(divergence, velocity_x, velocity_y):
     # Calculate divergence
     # (left_vx - right_vx + up_vy - down_vy) / 2
-    divergence[1:-1, 1:-1] = (
-        velocity_x[1:-1, :-2] - velocity_x[1:-1, 2:] + 
-        velocity_y[:-2, 1:-1] - velocity_y[2:, 1:-1]
-    ) / 2
+    y, x = cuda.grid(2)
+
+    if 1 <= y < divergence.shape[0] and 1 <= x < divergence.shape[1]:
+        divergence[y, x] = (
+            velocity_x[y, x - 1] - velocity_x[y, x + 1] + 
+            velocity_y[y - 1, x] - velocity_y[y + 1, x]
+        ) / 2
 
 @nb.njit(parallel=True)
 def calc_pressure(pressure, divergence, iter, omega = 1.5):
@@ -103,10 +107,17 @@ def diffuse(density, velocity_y, velocity_x, new_density, new_velocity_y, new_ve
 class FluidSim:
     def __init__(self, field: np.ndarray):
         self.front = field
-        self.back = Field(lambda y, x: field[y, x], field.shape)        
+        self.back = Field(lambda y, x: field[y, x], field.shape)
 
+        self.threads_per_block = (16, 16)
+        shape = self.front.density.shape
+        self.blocks_per_grid = (
+            (shape[0] + (self.threads_per_block[0] - 1)) // self.threads_per_block[0]
+            (shape[1] + (self.threads_per_block[1] - 1)) // self.threads_per_block[1]
+        )
+        
     def project(self, pressure_iter = 100):
-        calc_divergence(self.front.divergence, self.front.velocity_x, self.front.velocity_y)
+        calc_divergence[self.blocks_per_grid, self.threads_per_block](self.front.divergence, self.front.velocity_x, self.front.velocity_y)
         calc_pressure(self.front.pressure, self.front.divergence, pressure_iter)        
         apply_pressure(self.front.pressure, self.front.velocity_y, self.front.velocity_x)
     
